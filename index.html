@@ -1061,12 +1061,6 @@ function openCheckoutForm(){
     <input id="custName" placeholder="Як до вас звертатись">
     <label>Телефон *</label>
     <input id="custPhone" placeholder="+380...">
-    <label>Служба доставки *</label>
-    <select id="custCarrier" onchange="renderDeliveryFields()">
-      <option value="">— Оберіть —</option>
-      <option value="Нова Пошта">Нова Пошта</option>
-      <option value="Укрпошта">Укрпошта</option>
-    </select>
     <div id="deliveryFieldsWrap"></div>
     <label>Коментар (необов'язково)</label>
     <textarea id="custComment" placeholder="Розмір, колір, побажання..."></textarea>
@@ -1079,13 +1073,12 @@ function openCheckoutForm(){
 }
 
 function renderDeliveryFields(){
-  const carrier = document.getElementById('custCarrier').value;
   const wrap = document.getElementById('deliveryFieldsWrap');
   npSelectedCityRef = null;
 
-  if(carrier === 'Нова Пошта' && !NOVA_POSHTA_API_KEY.includes('ВАШ_КЛЮЧ')){
+  if(!NOVA_POSHTA_API_KEY.includes('ВАШ_КЛЮЧ')){
     wrap.innerHTML = `
-      <label>Місто *</label>
+      <label>Місто (Нова Пошта) *</label>
       <div style="position:relative;">
         <input id="custCity" placeholder="Почніть вводити назву міста" oninput="onCityInput()" autocomplete="off">
         <div id="citySuggestions" class="np-suggestions"></div>
@@ -1148,14 +1141,13 @@ async function selectCity(ref, label){
 function submitOrder(){
   const name = document.getElementById('custName').value.trim();
   const phone = document.getElementById('custPhone').value.trim();
-  const carrier = document.getElementById('custCarrier').value;
+  const carrier = 'Нова Пошта';
   const city = document.getElementById('custCity').value.trim();
   const branch = document.getElementById('custBranch').value.trim();
   const comment = document.getElementById('custComment').value.trim();
 
   if(!name){ showToast('Вкажіть ім\'я'); return; }
   if(!phone || phone.replace(/\D/g,'').length < 9){ showToast('Вкажіть коректний телефон'); return; }
-  if(!carrier){ showToast('Оберіть службу доставки'); return; }
   if(!city){ showToast('Вкажіть місто'); return; }
   if(!branch){ showToast('Вкажіть номер відділення або адресу'); return; }
 
