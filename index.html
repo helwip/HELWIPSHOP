@@ -620,6 +620,28 @@ async function npSearchWarehouses(cityRef){
     return null;
   }
 }
+
+// Пошук відділень по всій Україні (включно з селищами області), а не лише в обраному місті
+async function npSearchWarehousesGlobal(query){
+  if(NOVA_POSHTA_API_KEY.includes('ВАШ_КЛЮЧ')) return null;
+  try{
+    const res = await fetch('https://api.novaposhta.ua/v2.0/json/', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({
+        apiKey: NOVA_POSHTA_API_KEY,
+        modelName: 'AddressGeneral',
+        calledMethod: 'getWarehouses',
+        methodProperties: { FindByString: query, Limit: 40 }
+      })
+    });
+    const data = await res.json();
+    return (data && data.success && data.data) ? data.data : [];
+  }catch(e){
+    console.error('Nova Poshta global getWarehouses failed', e);
+    return null;
+  }
+}
 const CONFIRM_ORDER_URL = 'https://myra2281.github.io/helwipshop/confirm.html';
 
 async function sendTelegramNotification(order){
@@ -1084,9 +1106,11 @@ function renderDeliveryFields(){
         <div id="citySuggestions" class="np-suggestions"></div>
       </div>
       <label>Відділення / поштомат *</label>
-      <div id="custBranchWrap">
-        <select id="custBranch" disabled><option value="">Спершу оберіть місто</option></select>
+      <div style="position:relative;">
+        <input id="custBranch" placeholder="Спершу оберіть місто вище" disabled oninput="onBranchInput()" autocomplete="off">
+        <div id="branchSuggestions" class="np-suggestions"></div>
       </div>
+      <div style="color:var(--ink-dim); font-size:11.5px; margin-top:4px;">Можна шукати й відділення в сусідніх селищах області — просто почніть вводити назву населеного пункту.</div>
     `;
   } else {
     wrap.innerHTML = `
@@ -1101,7 +1125,13 @@ function renderDeliveryFields(){
 function onCityInput(){
   const q = document.getElementById('custCity').value.trim();
   npSelectedCityRef = null;
-  document.getElementById('custBranchWrap').innerHTML = '<select id="custBranch" disabled><option value="">Спершу оберіть місто</option></select>';
+  const branchInput = document.getElementById('custBranch');
+  if(branchInput){
+    branchInput.value = '';
+    branchInput.disabled = true;
+    branchInput.placeholder = 'Спершу оберіть місто вище';
+  }
+  document.getElementById('branchSuggestions').innerHTML = '';
   clearTimeout(npCitySearchTimer);
   const box = document.getElementById('citySuggestions');
   if(q.length < 2){ box.innerHTML = ''; return; }
@@ -1109,7 +1139,8 @@ function onCityInput(){
     const cities = await npSearchCities(q);
     if(cities === null){
       box.innerHTML = '<div class="np-suggestion" style="color:var(--red);">Пошук міст недоступний, введіть вручну</div>';
-      document.getElementById('custBranchWrap').innerHTML = '<input id="custBranch" placeholder="Наприклад, №25">';
+      branchInput.disabled = false;
+      branchInput.placeholder = 'Введіть номер відділення вручну';
       return;
     }
     if(cities.length === 0){ box.innerHTML = '<div class="np-suggestion" style="color:var(--ink-dim);">Нічого не знайдено</div>'; return; }
@@ -1124,18 +1155,57 @@ async function selectCity(ref, label){
   npSelectedCityRef = ref;
   document.getElementById('custCity').value = label;
   document.getElementById('citySuggestions').innerHTML = '';
-  document.getElementById('custBranchWrap').innerHTML = '<select id="custBranch" disabled><option value="">Завантажуємо відділення…</option></select>';
+
+  const branchInput = document.getElementById('custBranch');
+  branchInput.disabled = false;
+  branchInput.value = '';
+  branchInput.placeholder = 'Введіть номер відділення або назву вулиці';
+  branchInput.focus();
+
+  const box = document.getElementById('branchSuggestions');
+  box.innerHTML = '<div class="np-suggestion" style="color:var(--ink-dim);">Завантажуємо відділення…</div>';
 
   const warehouses = await npSearchWarehouses(ref);
-  const wrap = document.getElementById('custBranchWrap');
   if(warehouses === null || warehouses.length === 0){
-    wrap.innerHTML = '<input id="custBranch" placeholder="Введіть номер відділення вручну">';
+    box.innerHTML = '';
+    branchInput.placeholder = 'Введіть номер відділення вручну';
     return;
   }
-  wrap.innerHTML = `<select id="custBranch">
-    <option value="">— Оберіть відділення —</option>
-    ${warehouses.map(w=>`<option value="${w.Description.replace(/"/g,'&quot;')}">${w.Description}</option>`).join('')}
-  </select>`;
+  renderBranchSuggestions(warehouses);
+}
+
+function renderBranchSuggestions(warehouses){
+  const box = document.getElementById('branchSuggestions');
+  if(warehouses.length === 0){
+    box.innerHTML = '<div class="np-suggestion" style="color:var(--ink-dim);">Нічого не знайдено</div>';
+    return;
+  }
+  box.innerHTML = warehouses.map(w=>{
+    const desc = w.Description.replace(/'/g, "\\'");
+    return `<div class="np-suggestion" onclick='selectBranch(${JSON.stringify(w.Description)})'>${w.Description}</div>`;
+  }).join('');
+}
+
+function selectBranch(description){
+  document.getElementById('custBranch').value = description;
+  document.getElementById('branchSuggestions').innerHTML = '';
+}
+
+let npBranchSearchTimer = null;
+function onBranchInput(){
+  const q = document.getElementById('custBranch').value.trim();
+  clearTimeout(npBranchSearchTimer);
+  const box = document.getElementById('branchSuggestions');
+  if(q.length < 2){ box.innerHTML = ''; return; }
+  npBranchSearchTimer = setTimeout(async ()=>{
+    // Шукаємо по всій Україні (не тільки в обраному місті) — так знаходяться й відділення в селищах області
+    const warehouses = await npSearchWarehousesGlobal(q);
+    if(warehouses === null){
+      box.innerHTML = '';
+      return;
+    }
+    renderBranchSuggestions(warehouses);
+  }, 350);
 }
 
 function submitOrder(){
