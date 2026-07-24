@@ -436,6 +436,17 @@
   }
   .modal textarea{resize:vertical; min-height:60px;}
   .modal .row{display:flex; gap:10px; margin-top:18px;}
+  .np-suggestions{
+    position:absolute; top:100%; left:0; right:0; z-index:20;
+    background:var(--card-hover); border:1px solid var(--border); border-top:none;
+    border-radius:0 0 10px 10px; max-height:200px; overflow-y:auto;
+  }
+  .np-suggestion{
+    padding:10px 12px; font-size:13.5px; cursor:pointer; color:var(--ink);
+    border-bottom:1px solid var(--border);
+  }
+  .np-suggestion:last-child{border-bottom:none;}
+  .np-suggestion:hover{background:var(--bg-soft);}
 
   .toast{
     position:fixed; top:76px; left:50%; transform:translateX(-50%) translateY(-8px);
@@ -563,7 +574,52 @@ const ADMIN_EMAILS = ['shevchenko.myrosia@gmail.com', 'shevchenko.tusia@gmail.co
 const TELEGRAM_BOT_TOKEN = '8968818680:AAFbZwRe_xyAVKzihxvmcrqL1Sm8xJdFLmc';
 const TELEGRAM_CHAT_ID = '5481231724';
 
-// Адреса сторінки підтвердження замовлення (той самий сайт на GitHub Pages)
+// Нова Пошта — автопідбір міста і відділення (публічне безкоштовне API)
+const NOVA_POSHTA_API_KEY = '6da5bb43a3c483ebc55ef139acc0b1b4';
+let npSelectedCityRef = null;
+let npCitySearchTimer = null;
+
+async function npSearchCities(query){
+  if(NOVA_POSHTA_API_KEY.includes('ВАШ_КЛЮЧ')) return null;
+  try{
+    const res = await fetch('https://api.novaposhta.ua/v2.0/json/', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({
+        apiKey: NOVA_POSHTA_API_KEY,
+        modelName: 'Address',
+        calledMethod: 'getCities',
+        methodProperties: { FindByString: query, Limit: 15 }
+      })
+    });
+    const data = await res.json();
+    return (data && data.success && data.data) ? data.data : [];
+  }catch(e){
+    console.error('Nova Poshta getCities failed', e);
+    return null;
+  }
+}
+
+async function npSearchWarehouses(cityRef){
+  if(NOVA_POSHTA_API_KEY.includes('ВАШ_КЛЮЧ')) return null;
+  try{
+    const res = await fetch('https://api.novaposhta.ua/v2.0/json/', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({
+        apiKey: NOVA_POSHTA_API_KEY,
+        modelName: 'AddressGeneral',
+        calledMethod: 'getWarehouses',
+        methodProperties: { CityRef: cityRef, Limit: 500 }
+      })
+    });
+    const data = await res.json();
+    return (data && data.success && data.data) ? data.data : [];
+  }catch(e){
+    console.error('Nova Poshta getWarehouses failed', e);
+    return null;
+  }
+}
 const CONFIRM_ORDER_URL = 'https://myra2281.github.io/helwipshop/confirm.html';
 
 async function sendTelegramNotification(order){
@@ -998,6 +1054,7 @@ function checkout(){
 }
 
 function openCheckoutForm(){
+  npSelectedCityRef = null;
   openModal(`
     <h3>Оформлення замовлення</h3>
     <label>Ім'я *</label>
@@ -1005,15 +1062,12 @@ function openCheckoutForm(){
     <label>Телефон *</label>
     <input id="custPhone" placeholder="+380...">
     <label>Служба доставки *</label>
-    <select id="custCarrier">
+    <select id="custCarrier" onchange="renderDeliveryFields()">
       <option value="">— Оберіть —</option>
       <option value="Нова Пошта">Нова Пошта</option>
       <option value="Укрпошта">Укрпошта</option>
     </select>
-    <label>Місто *</label>
-    <input id="custCity" placeholder="Наприклад, Київ">
-    <label>Номер відділення / адреса *</label>
-    <input id="custBranch" placeholder="Наприклад, №25 або адреса">
+    <div id="deliveryFieldsWrap"></div>
     <label>Коментар (необов'язково)</label>
     <textarea id="custComment" placeholder="Розмір, колір, побажання..."></textarea>
     <div class="row">
@@ -1021,6 +1075,74 @@ function openCheckoutForm(){
       <button class="mc-btn secondary" style="flex:1" onclick="closeModal()">Скасувати</button>
     </div>
   `);
+  renderDeliveryFields();
+}
+
+function renderDeliveryFields(){
+  const carrier = document.getElementById('custCarrier').value;
+  const wrap = document.getElementById('deliveryFieldsWrap');
+  npSelectedCityRef = null;
+
+  if(carrier === 'Нова Пошта' && !NOVA_POSHTA_API_KEY.includes('ВАШ_КЛЮЧ')){
+    wrap.innerHTML = `
+      <label>Місто *</label>
+      <div style="position:relative;">
+        <input id="custCity" placeholder="Почніть вводити назву міста" oninput="onCityInput()" autocomplete="off">
+        <div id="citySuggestions" class="np-suggestions"></div>
+      </div>
+      <label>Відділення / поштомат *</label>
+      <div id="custBranchWrap">
+        <select id="custBranch" disabled><option value="">Спершу оберіть місто</option></select>
+      </div>
+    `;
+  } else {
+    wrap.innerHTML = `
+      <label>Місто *</label>
+      <input id="custCity" placeholder="Наприклад, Київ">
+      <label>Номер відділення / адреса *</label>
+      <div id="custBranchWrap"><input id="custBranch" placeholder="Наприклад, №25 або адреса"></div>
+    `;
+  }
+}
+
+function onCityInput(){
+  const q = document.getElementById('custCity').value.trim();
+  npSelectedCityRef = null;
+  document.getElementById('custBranchWrap').innerHTML = '<select id="custBranch" disabled><option value="">Спершу оберіть місто</option></select>';
+  clearTimeout(npCitySearchTimer);
+  const box = document.getElementById('citySuggestions');
+  if(q.length < 2){ box.innerHTML = ''; return; }
+  npCitySearchTimer = setTimeout(async ()=>{
+    const cities = await npSearchCities(q);
+    if(cities === null){
+      box.innerHTML = '<div class="np-suggestion" style="color:var(--red);">Пошук міст недоступний, введіть вручну</div>';
+      document.getElementById('custBranchWrap').innerHTML = '<input id="custBranch" placeholder="Наприклад, №25">';
+      return;
+    }
+    if(cities.length === 0){ box.innerHTML = '<div class="np-suggestion" style="color:var(--ink-dim);">Нічого не знайдено</div>'; return; }
+    box.innerHTML = cities.map(c=>{
+      const label = c.Description + (c.AreaDescription ? ', ' + c.AreaDescription + ' обл.' : '');
+      return `<div class="np-suggestion" onclick='selectCity(${JSON.stringify(c.Ref)}, ${JSON.stringify(label)})'>${label}</div>`;
+    }).join('');
+  }, 350);
+}
+
+async function selectCity(ref, label){
+  npSelectedCityRef = ref;
+  document.getElementById('custCity').value = label;
+  document.getElementById('citySuggestions').innerHTML = '';
+  document.getElementById('custBranchWrap').innerHTML = '<select id="custBranch" disabled><option value="">Завантажуємо відділення…</option></select>';
+
+  const warehouses = await npSearchWarehouses(ref);
+  const wrap = document.getElementById('custBranchWrap');
+  if(warehouses === null || warehouses.length === 0){
+    wrap.innerHTML = '<input id="custBranch" placeholder="Введіть номер відділення вручну">';
+    return;
+  }
+  wrap.innerHTML = `<select id="custBranch">
+    <option value="">— Оберіть відділення —</option>
+    ${warehouses.map(w=>`<option value="${w.Description.replace(/"/g,'&quot;')}">${w.Description}</option>`).join('')}
+  </select>`;
 }
 
 function submitOrder(){
