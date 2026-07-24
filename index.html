@@ -1174,21 +1174,36 @@ async function selectCity(ref, label){
   renderBranchSuggestions(warehouses);
 }
 
+let lastBranchResults = [];
+
 function renderBranchSuggestions(warehouses){
+  lastBranchResults = warehouses;
   const box = document.getElementById('branchSuggestions');
   if(warehouses.length === 0){
     box.innerHTML = '<div class="np-suggestion" style="color:var(--ink-dim);">Нічого не знайдено</div>';
     return;
   }
-  box.innerHTML = warehouses.map(w=>{
-    const desc = w.Description.replace(/'/g, "\\'");
-    return `<div class="np-suggestion" onclick='selectBranch(${JSON.stringify(w.Description)})'>${w.Description}</div>`;
+  box.innerHTML = warehouses.map((w,i)=>{
+    const place = w.SettlementDescription || w.CityDescription || '';
+    const area = w.SettlementAreaDescription ? `, ${w.SettlementAreaDescription} обл.` : '';
+    return `<div class="np-suggestion" onclick="selectBranchByIndex(${i})"><strong>${place}${area}</strong><br>${w.Description}</div>`;
   }).join('');
 }
 
-function selectBranch(description){
-  document.getElementById('custBranch').value = description;
+function selectBranchByIndex(i){
+  const w = lastBranchResults[i];
+  if(!w) return;
+  document.getElementById('custBranch').value = w.Description;
   document.getElementById('branchSuggestions').innerHTML = '';
+
+  // Синхронізуємо поле "Місто" з тим населеним пунктом, де насправді знаходиться обране відділення —
+  // це важливо, бо пошук відділень охоплює всю Україну і може відрізнятись від того, що набрано в полі міста.
+  const place = w.SettlementDescription || w.CityDescription;
+  if(place){
+    const area = w.SettlementAreaDescription ? `, ${w.SettlementAreaDescription} обл.` : '';
+    document.getElementById('custCity').value = place + area;
+    npSelectedCityRef = w.SettlementRef || w.CityRef || npSelectedCityRef;
+  }
 }
 
 let npBranchSearchTimer = null;
