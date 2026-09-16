@@ -172,7 +172,7 @@
   .inv-header span:last-child{font-size:13px; font-weight:500; color:var(--ink-dim);}
   .grid{
     display:grid;
-    grid-template-columns:repeat(auto-fill, minmax(260px, 1fr));
+    grid-template-columns:repeat(auto-fill, minmax(300px, 1fr));
     gap:16px;
   }
   .slot{
@@ -194,10 +194,10 @@
     width:100%; aspect-ratio:1/1;
     background:#f5f5f7;
     display:flex; align-items:center; justify-content:center;
-    font-size:110px;
+    font-size:150px;
     overflow:hidden;
   }
-  .slot .icon img{width:100%; height:100%; object-fit:contain; padding:12px;}
+  .slot .icon img{width:100%; height:100%; object-fit:cover;}
   .slot .body{
     padding:18px 20px 20px;
     display:flex; flex-direction:column; gap:9px;
@@ -236,6 +236,41 @@
   .slot .remove-slot:hover{background:var(--red); color:#fff; transform:scale(1.1);}
   body.edit-mode .slot .remove-slot{display:block;}
   body.edit-mode .slot .editable:hover{background:rgba(255,203,82,0.1);}
+
+  .videos-section{ margin:0 32px 64px; }
+  .videos-header{
+    display:flex; justify-content:space-between; align-items:center;
+    margin-bottom:18px;
+  }
+  .videos-header span{ color:var(--ink); font-size:20px; font-weight:700; }
+  .videos-grid{
+    display:grid;
+    grid-template-columns:repeat(auto-fill, minmax(280px,1fr));
+    gap:20px;
+  }
+  .video-card{
+    position:relative; cursor:pointer;
+    background:var(--card); border:1px solid var(--border); border-radius:var(--radius);
+    overflow:hidden;
+    transition:transform .2s var(--ease), border-color .2s var(--ease), box-shadow .2s var(--ease);
+  }
+  .video-card:hover{ transform:translateY(-4px); border-color:rgba(255,255,255,0.16); box-shadow:0 14px 30px rgba(0,0,0,0.35); }
+  .video-thumb{ width:100%; aspect-ratio:16/9; background:#000; overflow:hidden; }
+  .video-thumb img{ width:100%; height:100%; object-fit:cover; }
+  .video-thumb-empty{ width:100%; height:100%; display:flex; align-items:center; justify-content:center; color:var(--ink-dim); font-size:36px; }
+  .video-title{ padding:14px 16px; font-weight:700; font-size:13.5px; text-transform:uppercase; letter-spacing:.3px; color:var(--ink); line-height:1.4; }
+  .video-edit-pencil{
+    position:absolute; top:8px; right:8px; z-index:2; display:none;
+    background:var(--card); border:1px solid var(--border); border-radius:50%;
+    width:28px; height:28px; color:var(--orange); cursor:pointer; font-size:13px;
+    align-items:center; justify-content:center;
+  }
+  body.edit-mode .video-edit-pencil{ display:flex; }
+  .channel-link-pencil{
+    display:none; background:none; border:none; color:var(--ink-dim); font-size:14px; cursor:pointer; margin-left:6px;
+  }
+  body.edit-mode .channel-link-pencil{ display:inline-block; }
+
   .add-slot{
     background:transparent;
     border:1.5px dashed var(--border);
@@ -532,6 +567,22 @@
   <p class="editable" data-key="aboutText"><span data-text></span><span class="pencil">✎</span></p>
 </div>
 
+<div class="section-label">
+  <div class="tag">ОСТАННІ ВІДЕО</div>
+  <div class="line"></div>
+</div>
+
+<div class="videos-section">
+  <div class="videos-header">
+    <span>Нове на YouTube</span>
+    <span>
+      <a class="mc-btn small" id="channelBtn" href="#" target="_blank" rel="noopener">Перейти на канал</a>
+      <button class="channel-link-pencil" onclick="openTextEditModal('youtubeChannelUrl')" title="Змінити посилання на канал">✎</button>
+    </span>
+  </div>
+  <div class="videos-grid" id="videosGrid"></div>
+</div>
+
 <footer class="site">
   Helwip © 2026 · <span class="editable" data-key="socialLink" style="display:inline-block;"><span data-text></span><span class="pencil">✎</span></span>
 </footer>
@@ -709,7 +760,13 @@ const defaultContent = {
   heroTitle: 'Стань <span class="a">Богом</span> у <span class="b">Майнкрафті</span>',
   heroSub: "Кастомний мерч від Helwip — для тих, хто дивиться до кінця кожне відео і виживає в океані разом з нами.",
   aboutText: "Всім привіт! Ми знімаємо відео про Майнкрафт — челенджі, хоррор-моди та епічні виживання. Тут ви знайдете крутий мерч, щоб підтримати канал.",
-  socialLink: 't.me/Helwip'
+  socialLink: 't.me/Helwip',
+  youtubeChannelUrl: 'https://www.youtube.com/@Helwip',
+  videos: [
+    { url: '', title: '' },
+    { url: '', title: '' },
+    { url: '', title: '' }
+  ]
 };
 
 const SIZE_OPTIONS = ['XS','S','M','L','XL','XXL'];
@@ -833,6 +890,64 @@ function renderAll(){
   });
   renderProducts();
   renderCartFab();
+  renderVideos();
+}
+
+function extractYouTubeId(url){
+  if(!url) return null;
+  const m = url.match(/(?:youtube\.com\/(?:watch\?v=|shorts\/|embed\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
+  return m ? m[1] : null;
+}
+
+function renderVideos(){
+  const grid = document.getElementById('videosGrid');
+  if(!grid) return;
+  const videos = (content.videos && content.videos.length === 3) ? content.videos : [{},{},{}];
+  grid.innerHTML = videos.map((v,i)=>{
+    const id = extractYouTubeId(v.url);
+    const thumb = id ? `https://img.youtube.com/vi/${id}/hqdefault.jpg` : '';
+    const title = v.title || 'Додайте посилання на відео';
+    return `
+      <div class="video-card" onclick='onVideoCardClick(${i}, ${JSON.stringify(v.url || "")})'>
+        <div class="video-thumb">${thumb ? `<img src="${thumb}" alt="${title}">` : '<div class="video-thumb-empty">▶</div>'}</div>
+        <div class="video-title">${title}</div>
+        <button class="video-edit-pencil" onclick="event.stopPropagation(); openVideoEditModal(${i})">✎</button>
+      </div>
+    `;
+  }).join('');
+  const btn = document.getElementById('channelBtn');
+  if(btn) btn.href = content.youtubeChannelUrl || '#';
+}
+
+function onVideoCardClick(i, url){
+  if(editMode){ openVideoEditModal(i); return; }
+  if(url) window.open(url, '_blank');
+}
+
+function openVideoEditModal(i){
+  const v = (content.videos && content.videos[i]) || { url:'', title:'' };
+  openModal(`
+    <h3>Редагувати відео ${i+1}</h3>
+    <label>Посилання на YouTube-відео</label>
+    <input id="videoUrlField" value="${(v.url || '').replace(/"/g,'&quot;')}" placeholder="https://www.youtube.com/watch?v=...">
+    <label>Назва відео</label>
+    <input id="videoTitleField" value="${(v.title || '').replace(/"/g,'&quot;')}" placeholder="Назва під прев'ю">
+    <div class="row">
+      <button class="mc-btn" style="flex:1" onclick="saveVideoEdit(${i})">Зберегти</button>
+      <button class="mc-btn secondary" style="flex:1" onclick="closeModal()">Скасувати</button>
+    </div>
+  `);
+}
+
+function saveVideoEdit(i){
+  if(!content.videos || content.videos.length !== 3) content.videos = [{url:'',title:''},{url:'',title:''},{url:'',title:''}];
+  content.videos[i] = {
+    url: document.getElementById('videoUrlField').value.trim(),
+    title: document.getElementById('videoTitleField').value.trim()
+  };
+  saveSite();
+  renderVideos();
+  closeModal();
 }
 
 function renderProducts(){
