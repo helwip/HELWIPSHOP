@@ -755,6 +755,55 @@ async function fbSetJson(key, jsonStr){
   await db.collection(FB_COLLECTION).doc(key).set({ json: jsonStr, updatedAt: Date.now() });
 }
 
+// YouTube — автоматичне підтягування останніх 3 відео каналу (без ручного редагування)
+const YOUTUBE_API_KEY = 'AIzaSyDSw-JCd8dt5SDCjH2T1Zg16pMBoN8L2ZI';
+const YOUTUBE_CHANNEL_HANDLE = 'Helwip'; // назва каналу без символу @
+
+let autoVideos = null;
+let cachedUploadsPlaylistId = null;
+
+async function getUploadsPlaylistId(){
+  if(cachedUploadsPlaylistId) return cachedUploadsPlaylistId;
+  try{
+    const res = await fetch(`https://www.googleapis.com/youtube/v3/channels?part=contentDetails&forHandle=${YOUTUBE_CHANNEL_HANDLE}&key=${YOUTUBE_API_KEY}`);
+    const data = await res.json();
+    if(data.items && data.items.length){
+      cachedUploadsPlaylistId = data.items[0].contentDetails.relatedPlaylists.uploads;
+      return cachedUploadsPlaylistId;
+    }
+  }catch(e){
+    console.error('Не вдалося знайти канал YouTube', e);
+  }
+  return null;
+}
+
+async function fetchLatestVideos(){
+  if(YOUTUBE_API_KEY.includes('ВАШ_КЛЮЧ')) return null;
+  const playlistId = await getUploadsPlaylistId();
+  if(!playlistId) return null;
+  try{
+    const res = await fetch(`https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=3&playlistId=${playlistId}&key=${YOUTUBE_API_KEY}`);
+    const data = await res.json();
+    if(!data.items || !data.items.length) return null;
+    return data.items.map(it => ({
+      url: `https://www.youtube.com/watch?v=${it.snippet.resourceId.videoId}`,
+      title: it.snippet.title,
+      thumb: (it.snippet.thumbnails && (it.snippet.thumbnails.high || it.snippet.thumbnails.medium || it.snippet.thumbnails.default) || {}).url
+    }));
+  }catch(e){
+    console.error('Не вдалося завантажити відео YouTube', e);
+    return null;
+  }
+}
+
+async function loadAutoVideos(){
+  const videos = await fetchLatestVideos();
+  if(videos){
+    autoVideos = videos;
+    renderVideos();
+  }
+}
+
 const defaultContent = {
   eyebrow: "офіційний мерч",
   heroTitle: 'Стань <span class="a">Богом</span> у <span class="b">Майнкрафті</span>',
@@ -902,6 +951,20 @@ function extractYouTubeId(url){
 function renderVideos(){
   const grid = document.getElementById('videosGrid');
   if(!grid) return;
+
+  if(autoVideos && autoVideos.length){
+    grid.innerHTML = autoVideos.map(v=>`
+      <div class="video-card" onclick='onVideoCardClick(-1, ${JSON.stringify(v.url)})'>
+        <div class="video-thumb">${v.thumb ? `<img src="${v.thumb}" alt="${v.title}">` : '<div class="video-thumb-empty">▶</div>'}</div>
+        <div class="video-title">${v.title}</div>
+      </div>
+    `).join('');
+    const btn = document.getElementById('channelBtn');
+    if(btn) btn.href = content.youtubeChannelUrl || '#';
+    return;
+  }
+
+  // Резервний варіант — ручні відео (поки авто-підбір не налаштований або тимчасово недоступний)
   const videos = (content.videos && content.videos.length === 3) ? content.videos : [{},{},{}];
   grid.innerHTML = videos.map((v,i)=>{
     const id = extractYouTubeId(v.url);
@@ -920,7 +983,7 @@ function renderVideos(){
 }
 
 function onVideoCardClick(i, url){
-  if(editMode){ openVideoEditModal(i); return; }
+  if(editMode && i >= 0){ openVideoEditModal(i); return; }
   if(url) window.open(url, '_blank');
 }
 
@@ -1887,6 +1950,7 @@ setInterval(async ()=>{
 }, 6000);
 
 loadData();
+loadAutoVideos();
 </script>
 </body>
 </html>
