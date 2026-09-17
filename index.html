@@ -614,6 +614,11 @@
 
 <div class="toast" id="toast"></div>
 
+<div id="saveErrorBanner" style="display:none; position:fixed; top:0; left:0; right:0; z-index:999; background:#ef5b5b; color:#fff; font-size:13px; font-weight:600; padding:10px 16px; align-items:center; justify-content:center; gap:14px; text-align:center;">
+  <span></span>
+  <button onclick="retrySavesNow()" style="background:rgba(255,255,255,0.2); border:1px solid rgba(255,255,255,0.5); color:#fff; border-radius:6px; padding:4px 10px; cursor:pointer; font-weight:700;">Спробувати ще раз</button>
+</div>
+
 <script>
 const SITE_KEY = 'helwip-site-content';
 const PRODUCTS_KEY = 'helwip-products';
@@ -745,15 +750,72 @@ firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 const FB_COLLECTION = 'helwip-store';
 
+// Захист від "зависання" запиту (наприклад, якщо Firestore заблокований
+// розширенням-блокувальником реклами чи мережа нестабільна) — щоб не чекати вічно.
+function withTimeout(promise, ms){
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(()=> reject(new Error('Час очікування вичерпано')), ms || 10000))
+  ]);
+}
+
 async function fbGetJson(key){
-  const snap = await db.collection(FB_COLLECTION).doc(key).get();
+  const snap = await withTimeout(db.collection(FB_COLLECTION).doc(key).get());
   if(snap.exists && snap.data() && snap.data().json !== undefined) return snap.data().json;
   return null;
 }
 
 async function fbSetJson(key, jsonStr){
-  await db.collection(FB_COLLECTION).doc(key).set({ json: jsonStr, updatedAt: Date.now() });
+  await withTimeout(db.collection(FB_COLLECTION).doc(key).set({ json: jsonStr, updatedAt: Date.now() }));
 }
+
+// ---------- Локальна резервна копія + черга незбережених змін ----------
+// Якщо запис у базу даних не вдався (немає інтернету, тимчасовий збій,
+// заблоковано розширенням у браузері) — зміна не губиться: вона лишається
+// в localStorage і сайт автоматично повторює спробу, поки не вдасться.
+function cacheLocal(key, json){ try{ localStorage.setItem('helwip-cache-'+key, json); }catch(e){} }
+function getLocalCache(key){ try{ return localStorage.getItem('helwip-cache-'+key); }catch(e){ return null; } }
+function setPending(key, json){ try{ localStorage.setItem('helwip-pending-'+key, json); }catch(e){} }
+function clearPending(key){ try{ localStorage.removeItem('helwip-pending-'+key); }catch(e){} }
+function getPending(key){ try{ return localStorage.getItem('helwip-pending-'+key); }catch(e){ return null; } }
+
+function refreshSaveErrorBanner(){
+  const pending = ['site','products','orders'].filter(k=>getPending(k));
+  const el = document.getElementById('saveErrorBanner');
+  if(!el) return;
+  if(pending.length){
+    el.style.display = 'flex';
+    el.querySelector('span').textContent = '⚠ Не вдалося зберегти останні зміни в базу даних. Перевірте інтернет — сайт спробує ще раз автоматично.';
+  } else {
+    el.style.display = 'none';
+  }
+}
+
+async function flushPendingSaves(){
+  const pSite = getPending('site');
+  if(pSite){
+    try{ await fbSetJson(SITE_KEY, pSite); lastSiteJson = pSite; clearPending('site'); }catch(e){}
+  }
+  const pProd = getPending('products');
+  if(pProd){
+    try{ await fbSetJson(PRODUCTS_KEY, pProd); lastProductsJson = pProd; clearPending('products'); }catch(e){}
+  }
+  const pOrd = getPending('orders');
+  if(pOrd){
+    try{ await fbSetJson(ORDERS_KEY, pOrd); lastOrdersJson = pOrd; clearPending('orders'); }catch(e){}
+  }
+  refreshSaveErrorBanner();
+}
+
+function retrySavesNow(){
+  showToast('Пробуємо зберегти ще раз…');
+  flushPendingSaves();
+}
+
+// Автоматичні повторні спроби кожні 5 секунд, поки є незбережені зміни,
+// і одразу, коли браузер повідомляє, що зв'язок з інтернетом відновився.
+setInterval(flushPendingSaves, 5000);
+window.addEventListener('online', flushPendingSaves);
 
 // YouTube — автоматичне підтягування останніх 3 відео каналу (без ручного редагування)
 const YOUTUBE_API_KEY = 'AIzaSyDSw-JCd8dt5SDCjH2T1Zg16pMBoN8L2ZI';
@@ -851,27 +913,43 @@ function showToast(msg){
 }
 
 async function loadData(){
+  // Якщо з минулого разу лишились незбережені зміни (наприклад, вкладку
+  // закрили одразу після редагування, не дочекавшись підтвердження) —
+  // спершу пробуємо дописати саме їх, щоб не втратити останню правку.
+  await flushPendingSaves();
   try{
     const sJson = await fbGetJson(SITE_KEY);
     if(sJson){
       content = {...defaultContent, ...JSON.parse(sJson)};
       lastSiteJson = sJson;
+      cacheLocal('site', sJson);
     } else {
       await saveSite(true);
     }
   }catch(e){
-    console.log('site content not found, using defaults', e);
+    console.log('site content: не вдалося завантажити з бази, пробуємо локальну копію', e);
+    const cached = getLocalCache('site');
+    if(cached){
+      try{ content = {...defaultContent, ...JSON.parse(cached)}; lastSiteJson = cached; }catch(e2){}
+    }
+    refreshSaveErrorBanner();
   }
   try{
     const pJson = await fbGetJson(PRODUCTS_KEY);
     if(pJson){
       products = JSON.parse(pJson);
       lastProductsJson = pJson;
+      cacheLocal('products', pJson);
     } else {
       await saveProducts(true);
     }
   }catch(e){
-    console.log('products not found, using defaults', e);
+    console.log('products: не вдалося завантажити з бази, пробуємо локальну копію', e);
+    const cached = getLocalCache('products');
+    if(cached){
+      try{ products = JSON.parse(cached); lastProductsJson = cached; }catch(e2){}
+    }
+    refreshSaveErrorBanner();
   }
   try{
     const oJson = await fbGetJson(ORDERS_KEY);
@@ -904,35 +982,53 @@ async function loadData(){
 }
 
 async function saveSite(silent){
+  const json = JSON.stringify(content);
+  cacheLocal('site', json);
   try{
-    lastSiteJson = JSON.stringify(content);
-    await fbSetJson(SITE_KEY, lastSiteJson);
+    lastSiteJson = json;
+    await fbSetJson(SITE_KEY, json);
+    clearPending('site');
+    refreshSaveErrorBanner();
     if(!silent) showToast('Збережено ✔');
   }catch(e){
     console.error('save site failed', e);
-    if(!silent) showToast('Помилка збереження');
+    setPending('site', json);
+    refreshSaveErrorBanner();
+    if(!silent) showToast('Не вдалося зберегти, спробуємо ще раз автоматично');
   }
 }
 
 async function saveProducts(silent){
+  const json = JSON.stringify(products);
+  cacheLocal('products', json);
   try{
-    lastProductsJson = JSON.stringify(products);
-    await fbSetJson(PRODUCTS_KEY, lastProductsJson);
+    lastProductsJson = json;
+    await fbSetJson(PRODUCTS_KEY, json);
+    clearPending('products');
+    refreshSaveErrorBanner();
     if(!silent) showToast('Збережено ✔');
   }catch(e){
     console.error('save products failed', e);
-    if(!silent) showToast('Помилка збереження');
+    setPending('products', json);
+    refreshSaveErrorBanner();
+    if(!silent) showToast('Не вдалося зберегти, спробуємо ще раз автоматично');
   }
 }
 
 async function saveOrders(silent){
+  const json = JSON.stringify(orders);
+  cacheLocal('orders', json);
   try{
-    lastOrdersJson = JSON.stringify(orders);
-    await fbSetJson(ORDERS_KEY, lastOrdersJson);
+    lastOrdersJson = json;
+    await fbSetJson(ORDERS_KEY, json);
+    clearPending('orders');
+    refreshSaveErrorBanner();
     if(!silent) showToast('Збережено ✔');
   }catch(e){
     console.error('save orders failed', e);
-    if(!silent) showToast('Помилка збереження замовлення');
+    setPending('orders', json);
+    refreshSaveErrorBanner();
+    if(!silent) showToast('Не вдалося зберегти замовлення, спробуємо ще раз автоматично');
   }
 }
 
@@ -1927,32 +2023,43 @@ function deleteOrder(id){
   openOrdersView();
 }
 
-// Poll for live updates from other viewers/devices when not actively editing
+// Poll for live updates from other viewers/devices when not actively editing.
+// Пропускаємо оновлення з бази, поки є незбережені локальні зміни (getPending) —
+// інакше щойно введений текст/товар міг би відкотитися назад до старої версії
+// раніше, ніж наш запис на збереження встигне дійти до бази.
 setInterval(async ()=>{
   if(editMode) return;
-  try{
-    const sJson = await fbGetJson(SITE_KEY);
-    if(sJson && sJson !== lastSiteJson){
-      content = {...defaultContent, ...JSON.parse(sJson)};
-      lastSiteJson = sJson;
-      renderAll();
-    }
-  }catch(e){}
-  try{
-    const pJson = await fbGetJson(PRODUCTS_KEY);
-    if(pJson && pJson !== lastProductsJson){
-      products = JSON.parse(pJson);
-      lastProductsJson = pJson;
-      renderProducts();
-    }
-  }catch(e){}
-  try{
-    const oJson = await fbGetJson(ORDERS_KEY);
-    if(oJson && oJson !== lastOrdersJson){
-      orders = JSON.parse(oJson);
-      lastOrdersJson = oJson;
-    }
-  }catch(e){}
+  if(!getPending('site')){
+    try{
+      const sJson = await fbGetJson(SITE_KEY);
+      if(sJson && sJson !== lastSiteJson){
+        content = {...defaultContent, ...JSON.parse(sJson)};
+        lastSiteJson = sJson;
+        cacheLocal('site', sJson);
+        renderAll();
+      }
+    }catch(e){}
+  }
+  if(!getPending('products')){
+    try{
+      const pJson = await fbGetJson(PRODUCTS_KEY);
+      if(pJson && pJson !== lastProductsJson){
+        products = JSON.parse(pJson);
+        lastProductsJson = pJson;
+        cacheLocal('products', pJson);
+        renderProducts();
+      }
+    }catch(e){}
+  }
+  if(!getPending('orders')){
+    try{
+      const oJson = await fbGetJson(ORDERS_KEY);
+      if(oJson && oJson !== lastOrdersJson){
+        orders = JSON.parse(oJson);
+        lastOrdersJson = oJson;
+      }
+    }catch(e){}
+  }
 }, 6000);
 
 loadData();
