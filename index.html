@@ -49,7 +49,7 @@
     backdrop-filter:blur(14px);
     border-bottom:1px solid var(--border);
   }
-  .brand{display:flex; align-items:center; gap:12px;}
+  .brand{display:flex; align-items:center; gap:12px; flex-shrink:0;}
   .brand .mark{
     width:36px; height:36px; border-radius:10px;
     background:linear-gradient(135deg, var(--orange), var(--blue));
@@ -58,7 +58,18 @@
   }
   .brand .name{font-size:16px; font-weight:700; letter-spacing:0.2px; color:var(--blue);}
   .brand .name span{color:var(--orange);}
-  nav.top{display:flex; align-items:center; gap:22px;}
+  /* Коли пунктів більше, ніж влазить у ширину екрана (мобільні, увійшли + адмінка),
+     меню прокручується горизонтально замість того, щоб обрізатися чи стискатися. */
+  nav.top{
+    display:flex; align-items:center; gap:22px;
+    flex:1; min-width:0;
+    overflow-x:auto; -webkit-overflow-scrolling:touch;
+    scrollbar-width:none; -ms-overflow-style:none;
+    mask-image:linear-gradient(to right, transparent 0, #000 14px, #000 calc(100% - 14px), transparent 100%);
+    -webkit-mask-image:linear-gradient(to right, transparent 0, #000 14px, #000 calc(100% - 14px), transparent 100%);
+  }
+  nav.top::-webkit-scrollbar{display:none;}
+  nav.top a, nav.top button{flex-shrink:0;}
   nav.top a{color:var(--ink-dim); font-weight:500; font-size:14px; transition:color .2s var(--ease);}
   nav.top a:hover{color:var(--ink);}
 
