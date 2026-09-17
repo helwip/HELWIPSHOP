@@ -890,8 +890,13 @@ async function loadData(){
   }
   try{
     const savedEmail = localStorage.getItem('helwip-session');
-    if(savedEmail && accounts[savedEmail]){
-      currentUserEmail = savedEmail;
+    if(savedEmail) currentUserEmail = savedEmail;
+  }catch(e){}
+  try{
+    const savedCart = localStorage.getItem('helwip-cart');
+    if(savedCart){
+      const parsed = JSON.parse(savedCart);
+      if(parsed && typeof parsed === 'object') cart = parsed;
     }
   }catch(e){}
   renderAll();
@@ -1194,6 +1199,7 @@ function closeProductPage(){
 }
 
 function renderCartFab(){
+  try{ localStorage.setItem('helwip-cart', JSON.stringify(cart)); }catch(e){}
   const count = Object.values(cart).reduce((sum,q)=>sum+q, 0);
   const badge = document.getElementById('cartFabCount');
   if(count > 0){
