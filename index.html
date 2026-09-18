@@ -63,6 +63,7 @@
   nav.top{
     display:flex; align-items:center; gap:22px;
     flex:1; min-width:0;
+    margin-left:28px;
     overflow-x:auto; -webkit-overflow-scrolling:touch;
     scrollbar-width:none; -ms-overflow-style:none;
     mask-image:linear-gradient(to right, transparent 0, #000 14px, #000 calc(100% - 14px), transparent 100%);
@@ -255,12 +256,14 @@
   }
   .videos-header span{ color:var(--ink); font-size:20px; font-weight:700; }
   .videos-grid{
-    display:grid;
-    grid-template-columns:repeat(auto-fill, minmax(280px,1fr));
+    display:flex;
+    flex-wrap:wrap;
+    justify-content:center;
     gap:20px;
   }
   .video-card{
     position:relative; cursor:pointer;
+    flex:1 1 280px; max-width:340px;
     background:var(--card); border:1px solid var(--border); border-radius:var(--radius);
     overflow:hidden;
     transition:transform .2s var(--ease), border-color .2s var(--ease), box-shadow .2s var(--ease);
